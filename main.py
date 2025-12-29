@@ -7,10 +7,10 @@ import os
 
 # ================= কনফিগারেশন (আপনার তথ্য দিন) =================
 # ১. আপনার বটের টোকেন
-BOT_TOKEN = "আপনার_বট_টোকেন_এখানে_দিন"
+BOT_TOKEN = "8536336775:AAESxUalVaN4ABnzlgCdVLqa9dyGDwY_cUQ"
 
 # ২. আপনার চ্যানেলের ইউজারনেম (@ সহ)
-CHANNEL_ID = "@আপনার_চ্যানেলের_নাম"
+CHANNEL_ID = "@CineZoneBD1"
 
 # ৩. আপনার ব্লগের ফিড লিংক
 RSS_FEED_URL = "https://banglaflix4k.blogspot.com/feeds/posts/default"
