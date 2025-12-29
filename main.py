@@ -14,7 +14,7 @@ RSS_FEED_URL = "https://banglaflix4k.blogspot.com/feeds/posts/default"
 CHECK_INTERVAL = 15 
 
 # আপনার টিউটোরিয়াল ভিডিওর লিংক নিচে দিন (ভিডিও না থাকলে লিংক খালি রাখবেন না, যেকোনো একটা লিংক দিন)
-TUTORIAL_VIDEO_LINK = "https://t.me/CineZoneBD1" 
+TUTORIAL_VIDEO_LINK = "https://t.me/HowtoDowlnoad/33" 
 # ============================================
 
 app = Flask(__name__)
