@@ -3,11 +3,11 @@ import requests
 import time
 import threading
 import json
+import re  # ছবি খোঁজার জন্য নতুন টুল
 from flask import Flask
 import os
 
 # ================= কনফিগারেশন =================
-# আপনার দেওয়া তথ্য এখানে বসানো হয়েছে
 BOT_TOKEN = "8536336775:AAESxUalVaN4ABnzlgCdVLqa9dyGDwY_cUQ"
 CHANNEL_ID = "@CineZoneBD1"
 RSS_FEED_URL = "https://banglaflix4k.blogspot.com/feeds/posts/default"
@@ -18,11 +18,10 @@ app = Flask(__name__)
 last_posted_link = None
 
 def send_to_telegram(title, link, image_url):
-    # API URL
     api_url_photo = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
     api_url_msg = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     
-    # ১. ক্যাপশন ডিজাইন
+    # === ১. প্রিমিয়াম ডিজাইন (ক্যাপশন) ===
     caption = f"🎬 <b>{title}</b>\n\n" \
               f"✨ <i>New Movie Uploaded!</i>\n" \
               f"━━━━━━━━━━━━━━━━━━\n" \
@@ -31,10 +30,7 @@ def send_to_telegram(title, link, image_url):
               f"━━━━━━━━━━━━━━━━━━\n" \
               f"👇 <i>Click the buttons below to watch</i>"
 
-    # ২. বাটন সেটআপ (Error Handling সহ)
-    if not link.startswith('http'):
-        link = "https://banglaflix4k.blogspot.com" # সেফটি লিংক
-        
+    # === ২. বাটন সেটআপ ===
     buttons = {
         "inline_keyboard": [
             [
@@ -47,7 +43,6 @@ def send_to_telegram(title, link, image_url):
         ]
     }
 
-    # ৩. ডাটা পাঠানো (Payload)
     payload = {
         'chat_id': CHANNEL_ID,
         'caption': caption,
@@ -56,41 +51,58 @@ def send_to_telegram(title, link, image_url):
     }
 
     try:
-        # প্রথমে ছবি সহ পাঠানোর চেষ্টা
-        if image_url:
+        # যদি ছবি পাওয়া যায়, তাহলে ছবি সহ পাঠাবে (সবচেয়ে সুন্দর দেখাবে)
+        if image_url and image_url.startswith('http'):
             payload['photo'] = image_url
             r = requests.post(api_url_photo, data=payload)
-        else:
-            # ছবি না থাকলে সরাসরি টেক্সট মোডে যাবে
-            r = requests.post(api_url_msg, data=payload)
+            
+            if r.status_code == 200:
+                print(f"✅ Success with Photo: {title}")
+                return # কাজ শেষ, ফাংশন থেকে বের হয়ে যাবে
+            else:
+                print(f"⚠️ Photo Error: {r.text} - Switching to Text Mode with Buttons")
 
-        # ৪. রেজাল্ট চেক করা
+        # === ব্যাকআপ প্ল্যান: যদি ছবি না থাকে বা এরর হয় ===
+        # তবুও বাটন সহ সুন্দর টেক্সট পাঠাবে (আগের মতো সাদামাটা লিংক দেখাবে না)
+        payload.pop('photo', None) # ফটো ফিল্ড মুছে ফেলা হলো
+        payload['text'] = caption # ক্যাপশনকে টেক্সট হিসেবে সেট করা হলো
+        payload['disable_web_page_preview'] = False # লিংক প্রিভিউ চালু থাকবে
+        
+        r = requests.post(api_url_msg, data=payload)
         if r.status_code == 200:
-            print(f"✅ SUCCESS: Post sent for '{title}'")
+            print(f"✅ Success (Text Mode): {title}")
         else:
-            print(f"⚠️ Telegram Error: {r.text}")
-            # যদি ছবি বা ক্যাপশনের কারণে এরর খায়, তবে সিম্পল টেক্সট পাঠাবে (ব্যাকআপ)
-            if "description" in r.text:
-                print("🔄 Trying fallback mode (Simple Text)...")
-                requests.post(api_url_msg, data={
-                    'chat_id': CHANNEL_ID, 
-                    'text': f"🎬 {title}\n\nLink: {link}"
-                })
+            print(f"❌ Critical Error: {r.text}")
 
     except Exception as e:
         print(f"❌ Network Error: {e}")
 
+def get_high_quality_image(entry):
+    """ব্লগার পোস্ট থেকে সেরা ছবিটি খুঁজে বের করার ফাংশন"""
+    try:
+        # ১. প্রথমে পোস্টের ভেতরের HTML কন্টেন্ট চেক করবে (সবচেয়ে ভালো উপায়)
+        content = entry.content[0].value
+        img_match = re.search(r'<img[^>]+src="([^">]+)"', content)
+        if img_match:
+            return img_match.group(1)
+            
+        # ২. যদি কন্টেন্টে না পায়, থাম্বনেইল চেক করবে
+        if 'media_thumbnail' in entry:
+            return entry.media_thumbnail[0]['url'].replace('s72-c', 's1600') # হাই কোয়ালিটি কনভার্ট
+            
+    except Exception as e:
+        print(f"Image extract error: {e}")
+    return None
+
 def check_feed():
     global last_posted_link
-    print("🤖 Bot is active and watching for NEW movies...")
+    print("🤖 Bot is active...")
     
-    # বট যখন চালু হবে, তখন ব্লগের লাস্ট পোস্টটা দেখে রাখবে (কিন্তু পোস্ট করবে না)
-    # যাতে রিস্টার্ট হওয়ার সাথে সাথে পুরনো পোস্ট আবার না যায়।
     try:
         feed = feedparser.parse(RSS_FEED_URL)
         if feed.entries:
             last_posted_link = feed.entries[0].link
-            print(f"👁️ First Check Done. Ignoring old post: {feed.entries[0].title}")
+            print(f"Initial Check Done. Ignoring: {feed.entries[0].title}")
     except:
         pass
 
@@ -102,33 +114,27 @@ def check_feed():
                 current_link = latest_post.link
                 title = latest_post.title
                 
-                # লজিক: যদি মেমোরিতে থাকা লিংকের সাথে বর্তমান লিংক না মিলে, তার মানে নতুন পোস্ট এসেছে
                 if last_posted_link and current_link != last_posted_link:
-                    print(f"🔥 New Movie Detected: {title}")
+                    print(f"🔥 New Post: {title}")
                     
-                    # হাই কোয়ালিটি ইমেজ বের করা
-                    image_url = ""
-                    if 'media_thumbnail' in latest_post:
-                        image_url = latest_post.media_thumbnail[0]['url'].replace('s72-c', 's1600') 
+                    # নতুন এবং শক্তিশালী ইমেজ বের করার পদ্ধতি
+                    image_url = get_high_quality_image(latest_post)
                     
                     send_to_telegram(title, current_link, image_url)
-                    
-                    # মেমোরি আপডেট
                     last_posted_link = current_link
                 
-                # যদি সার্ভার প্রথমবার রান হয়
                 elif last_posted_link is None:
                      last_posted_link = current_link
 
             time.sleep(CHECK_INTERVAL)
             
         except Exception as e:
-            print(f"❌ Feed Check Error: {e}")
+            print(f"❌ Feed Error: {e}")
             time.sleep(15)
 
 @app.route('/')
 def home():
-    return "✅ Final Movie Bot is Running Perfectly!"
+    return "✅ Bot Updated with Image Fixer!"
 
 def run_bot():
     t = threading.Thread(target=check_feed)
