@@ -8,16 +8,15 @@ from flask import Flask
 import os
 
 # ================= কনফিগারেশন =================
-# আপনার বটের টোকেন (এটি ফিক্সড থাকবে)
+# আপনার বটের টোকেন
 BOT_TOKEN = "8536336775:AAESxUalVaN4ABnzlgCdVLqa9dyGDwY_cUQ"
 
 # ডাটা সেভ রাখার ফাইল
 DATA_FILE = 'user_data.json'
-CHECK_INTERVAL = 60 # মাল্টি ইউজার তাই ১৫ সেকেন্ড না দিয়ে ১ মিনিট দেওয়া হলো (সেফটির জন্য)
+CHECK_INTERVAL = 60 # ১ মিনিট পর পর চেক করবে
 # ============================================
 
 app = Flask(__name__)
-# মেমোরিতে ডাটা রাখার জন্য ডিকশনারি
 users_db = {}
 
 # === ডাটা লোড এবং সেভ করার ফাংশন ===
@@ -40,10 +39,10 @@ def save_data():
     except Exception as e:
         print(f"⚠️ Error saving data: {e}")
 
-# === টেলিগ্রাম কমান্ড হ্যান্ডলার (নতুন ইউজার অ্যাড করা) ===
+# === টেলিগ্রাম কমান্ড হ্যান্ডলার ===
 def handle_commands():
     offset = 0
-    print("🎧 Bot is listening for /setup commands...")
+    print("🎧 Bot is listening for commands...")
     
     while True:
         try:
@@ -58,7 +57,6 @@ def handle_commands():
                         chat_id = str(update["message"]["chat"]["id"])
                         text = update["message"]["text"]
                         
-                        # কমান্ড ফরম্যাট: /setup @Channel FeedLink TutorialLink
                         if text.startswith("/setup"):
                             parts = text.split()
                             if len(parts) >= 4:
@@ -66,7 +64,6 @@ def handle_commands():
                                 feed_url = parts[2]
                                 tutorial_link = parts[3]
                                 
-                                # ডাটাবেসে সেভ করা
                                 users_db[chat_id] = {
                                     "channel": channel,
                                     "feed": feed_url,
@@ -75,20 +72,16 @@ def handle_commands():
                                 }
                                 save_data()
                                 
-                                reply = f"✅ <b>Setup Complete!</b>\n\n" \
-                                        f"📢 Channel: {channel}\n" \
-                                        f"🔗 Feed: {feed_url}\n" \
-                                        f"📺 Tutorial: {tutorial_link}\n\n" \
-                                        f"<i>Make sure the bot is an Admin in your channel!</i>"
+                                reply = f"✅ <b>Setup Complete!</b>\n\n📢 Channel: {channel}\n🔗 Feed: {feed_url}"
                                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
                                               data={'chat_id': chat_id, 'text': reply, 'parse_mode': 'HTML'})
                             else:
-                                error_msg = "❌ <b>Wrong Format!</b>\nUse:\n<code>/setup @Channel FeedLink TutorialLink</code>"
+                                error_msg = "❌ <b>Wrong Format!</b>\nUse: <code>/setup @Channel FeedLink TutorialLink</code>"
                                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
                                               data={'chat_id': chat_id, 'text': error_msg, 'parse_mode': 'HTML'})
                                               
                         elif text.startswith("/start"):
-                            welcome = "👋 <b>Welcome!</b>\nTo connect your website, send:\n\n<code>/setup @YourChannel FeedLink TutorialLink</code>"
+                            welcome = "👋 <b>Welcome!</b>\nTo connect your website, send:\n<code>/setup @YourChannel FeedLink TutorialLink</code>"
                             requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
                                           data={'chat_id': chat_id, 'text': welcome, 'parse_mode': 'HTML'})
 
@@ -97,7 +90,7 @@ def handle_commands():
             print(f"Command Error: {e}")
             time.sleep(5)
 
-# === পোস্ট পাঠানোর ফাংশন (ডাইনামিক) ===
+# === পোস্ট পাঠানোর ফাংশন (আপডেটেড ডিজাইন) ===
 def send_to_telegram(user_id, title, link, image_url, tags):
     user_config = users_db.get(user_id)
     if not user_config: return
@@ -108,23 +101,37 @@ def send_to_telegram(user_id, title, link, image_url, tags):
     api_url_photo = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
     api_url_msg = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     
+    # --- ডিজাইন মডিফিকেশন শুরু (লজিক সেম আছে) ---
+    
+    # ট্যাগগুলোকে হ্যাশট্যাগ (#Tag) স্টাইলে কনভার্ট করা যাতে সুন্দর লাগে
+    # যদি ট্যাগ না থাকে তবে ডিফল্ট ট্যাগ বসাবে
+    if tags and tags != "Multi Language":
+        formatted_tags = " ".join([f"#{t.strip().replace(' ', '_')}" for t in tags.split(',')])
+    else:
+        formatted_tags = "#New_Release #Exclusive"
+
+    # নতুন প্রিমিয়াম ক্যাপশন টেমপ্লেট
     caption = f"🎬 <b>{title}</b>\n\n" \
-              f"💿 <b>Quality:</b> HD\n" \
-              f"🗣 <b>Language:</b> {tags}\n" \
-              f"━━━━━━━━━━━━━━━━━━\n" \
-              f"👇 <i>Click buttons to watch or download</i>"
+              f"🎭 <b>Genre:</b> {formatted_tags}\n" \
+              f"💿 <b>Quality:</b> <code>HD-Rip | WEB-DL</code>\n" \
+              f"🔊 <b>Audio:</b> <code>Dual Audio | Multi</code>\n" \
+              f"─────────────────────\n" \
+              f"📥 <b>Fast High Speed Download</b>\n" \
+              f"👇 <i>Click the buttons below to start</i>"
+
+    # --- ডিজাইন মডিফিকেশন শেষ ---
 
     buttons = {
         "inline_keyboard": [
             [
-                {"text": "▶️ Watch Online", "url": link},
-                {"text": "📥 Download Now", "url": link}
+                {"text": "📥 Download Now", "url": link},
+                {"text": "▶️ Watch Online", "url": link}
             ],
             [
                 {"text": "📺 How to Download", "url": tutorial_link}
             ],
             [
-                {"text": "🚀 Share with Friends", "url": f"https://t.me/share/url?url={link}"}
+                {"text": "♻️ Share with Friends", "url": f"https://t.me/share/url?url={link}"}
             ]
         ]
     }
@@ -167,15 +174,13 @@ def get_high_quality_image(entry):
         pass
     return None
 
-# === মেইন চেকিং লুপ (সব ইউজারের জন্য) ===
+# === মেইন চেকিং লুপ ===
 def check_feeds_loop():
     print("🤖 Multi-User Bot Started...")
-    load_data() # প্রথমে সেভ করা ডাটা লোড করবে
+    load_data()
 
     while True:
         try:
-            # সব ইউজারের লিস্ট চেক করবে
-            # users_db.items() এর কপি নেওয়া হচ্ছে যাতে লুপের সময় এরর না হয়
             for user_id, config in list(users_db.items()):
                 feed_url = config['feed']
                 last_link = config['last_link']
@@ -186,7 +191,6 @@ def check_feeds_loop():
                         latest_post = feed.entries[0]
                         current_link = latest_post.link
                         
-                        # যদি নতুন পোস্ট হয়
                         if last_link and current_link != last_link:
                             title = latest_post.title
                             image_url = get_high_quality_image(latest_post)
@@ -198,11 +202,9 @@ def check_feeds_loop():
                             print(f"🔥 New Post for {config['channel']}: {title}")
                             send_to_telegram(user_id, title, current_link, image_url, tags)
                             
-                            # ডাটাবেস আপডেট
                             users_db[user_id]['last_link'] = current_link
                             save_data()
                         
-                        # প্রথমবার রান হলে শুধু লিংক সেভ করবে, পোস্ট করবে না
                         elif last_link is None:
                             users_db[user_id]['last_link'] = current_link
                             save_data()
@@ -221,7 +223,6 @@ def home():
     return f"✅ Multi-User Bot Running! Active Users: {len(users_db)}"
 
 def run_bot():
-    # দুটি আলাদা থ্রেড: একটি কমান্ড শুনবে, আরেকটি ফিড চেক করবে
     t1 = threading.Thread(target=check_feeds_loop)
     t2 = threading.Thread(target=handle_commands)
     t1.start()
