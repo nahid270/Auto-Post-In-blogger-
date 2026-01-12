@@ -4,223 +4,190 @@ import time
 import threading
 import json
 import re
+import base64
+from bs4 import BeautifulSoup
 from flask import Flask
 import os
 
 # ================= কনফিগারেশন =================
-# আপনার বটের টোকেন
 BOT_TOKEN = "8536336775:AAESxUalVaN4ABnzlgCdVLqa9dyGDwY_cUQ"
-
-# ডাটা সেভ রাখার ফাইল
 DATA_FILE = 'user_data.json'
-CHECK_INTERVAL = 60 # ১ মিনিট পর পর চেক করবে
+CHECK_INTERVAL = 60 
 # ============================================
 
 app = Flask(__name__)
 users_db = {}
 
-# === ডাটা লোড এবং সেভ করার ফাংশন ===
+# === ডাটা লোড/সেভ ===
 def load_data():
     global users_db
     try:
         if os.path.exists(DATA_FILE):
             with open(DATA_FILE, 'r') as f:
                 users_db = json.load(f)
-            print("✅ User Data Loaded Successfully!")
-        else:
-            users_db = {}
-    except Exception as e:
-        print(f"⚠️ Error loading data: {e}")
+    except:
+        users_db = {}
 
 def save_data():
     try:
         with open(DATA_FILE, 'w') as f:
             json.dump(users_db, f)
+    except:
+        pass
+
+# === HTML থেকে সব ডাটা (Link, Poster, Genre, Language) বের করার ফাংশন ===
+def parse_html_data(html_content):
+    soup = BeautifulSoup(html_content, 'html.parser')
+    
+    # ডিফল্ট ডাটা
+    data = {
+        'poster': None,
+        'download_link': None,
+        'genre': 'Movie / Web Series', # ডিফল্ট যদি না পায়
+        'language': 'Dual Audio [Hin-Eng]' # ডিফল্ট যদি না পায়
+    }
+    
+    try:
+        # ১. পোস্টার বের করা
+        img_tag = soup.find('img', class_='poster-img')
+        if img_tag:
+            data['poster'] = img_tag.get('src')
+            
+        # ২. সিক্রেট ডাউনলোড লিংক বের করা
+        btn = soup.find('button', class_='rgb-btn')
+        if btn and 'onclick' in btn.attrs:
+            match = re.search(r"secureLink\(this,\s*'([^']+)'", btn['onclick'])
+            if match:
+                data['download_link'] = base64.b64decode(match.group(1)).decode('utf-8')
+
+        # ৩. Genre এবং Language বের করা (HTML টেক্সট থেকে)
+        # আপনার HTML এ যদি লেখা থাকে "Genre: Action" বা "Language: Hindi" তাহলে এটা কাজ করবে
+        full_text = soup.get_text()
+        
+        # Regex দিয়ে খোঁজা হচ্ছে
+        genre_match = re.search(r'(?:Genre|Category)\s*[:|-]\s*(.*)', full_text, re.IGNORECASE)
+        lang_match = re.search(r'(?:Language|Audio)\s*[:|-]\s*(.*)', full_text, re.IGNORECASE)
+        
+        if genre_match:
+            # অতিরিক্ত স্পেস বা লাইন ব্রেক থাকলে পরিষ্কার করা
+            clean_genre = genre_match.group(1).split('\n')[0].strip()
+            data['genre'] = clean_genre
+            
+        if lang_match:
+            clean_lang = lang_match.group(1).split('\n')[0].strip()
+            data['language'] = clean_lang
+            
     except Exception as e:
-        print(f"⚠️ Error saving data: {e}")
+        print(f"HTML Parsing Error: {e}")
+        
+    return data
 
 # === টেলিগ্রাম কমান্ড হ্যান্ডলার ===
 def handle_commands():
     offset = 0
-    print("🎧 Bot is listening for commands...")
-    
+    print("🎧 Bot Started...")
     while True:
         try:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?offset={offset}&timeout=10"
-            response = requests.get(url).json()
-            
-            if "result" in response:
-                for update in response["result"]:
-                    offset = update["update_id"] + 1
-                    
-                    if "message" in update and "text" in update["message"]:
-                        chat_id = str(update["message"]["chat"]["id"])
-                        text = update["message"]["text"]
+            r = requests.get(url).json()
+            if "result" in r:
+                for u in r["result"]:
+                    offset = u["update_id"] + 1
+                    if "message" in u and "text" in u["message"]:
+                        chat_id = str(u["message"]["chat"]["id"])
+                        text = u["message"]["text"]
                         
                         if text.startswith("/setup"):
                             parts = text.split()
-                            if len(parts) >= 4:
+                            if len(parts) >= 3:
                                 channel = parts[1]
-                                feed_url = parts[2]
-                                tutorial_link = parts[3]
-                                
-                                users_db[chat_id] = {
-                                    "channel": channel,
-                                    "feed": feed_url,
-                                    "tutorial": tutorial_link,
-                                    "last_link": None
-                                }
+                                feed = parts[2]
+                                tutorial = parts[3] if len(parts) > 3 else "https://t.me/"
+                                users_db[chat_id] = {"channel": channel, "feed": feed, "tutorial": tutorial, "last_link": None}
                                 save_data()
-                                
-                                reply = f"✅ <b>Setup Complete!</b>\n\n📢 Channel: {channel}\n🔗 Feed: {feed_url}"
                                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
-                                              data={'chat_id': chat_id, 'text': reply, 'parse_mode': 'HTML'})
-                            else:
-                                error_msg = "❌ <b>Wrong Format!</b>\nUse: <code>/setup @Channel FeedLink TutorialLink</code>"
-                                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
-                                              data={'chat_id': chat_id, 'text': error_msg, 'parse_mode': 'HTML'})
-                                              
-                        elif text.startswith("/start"):
-                            welcome = "👋 <b>Welcome!</b>\nTo connect your website, send:\n<code>/setup @YourChannel FeedLink TutorialLink</code>"
-                            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
-                                          data={'chat_id': chat_id, 'text': welcome, 'parse_mode': 'HTML'})
-
-            time.sleep(1)
-        except Exception as e:
-            print(f"Command Error: {e}")
+                                              data={'chat_id': chat_id, 'text': "✅ Setup Done!"})
+        except:
             time.sleep(5)
 
-# === পোস্ট পাঠানোর ফাংশন (আপডেটেড ডিজাইন) ===
-def send_to_telegram(user_id, title, link, image_url, tags):
+# === পোস্ট পাঠানোর ফাংশন ===
+def send_to_telegram(user_id, title, blog_link, html_content):
     user_config = users_db.get(user_id)
     if not user_config: return
 
-    channel_id = user_config['channel']
-    tutorial_link = user_config['tutorial']
+    # HTML থেকে সব ডাটা নেওয়া হচ্ছে
+    extracted = parse_html_data(html_content)
     
-    api_url_photo = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-    api_url_msg = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    
-    # --- ডিজাইন মডিফিকেশন শুরু (লজিক সেম আছে) ---
-    
-    # ট্যাগগুলোকে হ্যাশট্যাগ (#Tag) স্টাইলে কনভার্ট করা যাতে সুন্দর লাগে
-    # যদি ট্যাগ না থাকে তবে ডিফল্ট ট্যাগ বসাবে
-    if tags and tags != "Multi Language":
-        formatted_tags = " ".join([f"#{t.strip().replace(' ', '_')}" for t in tags.split(',')])
-    else:
-        formatted_tags = "#New_Release #Exclusive"
+    final_link = extracted['download_link'] if extracted['download_link'] else blog_link
+    poster = extracted['poster']
+    genre_text = extracted['genre']
+    lang_text = extracted['language']
 
-    # নতুন প্রিমিয়াম ক্যাপশন টেমপ্লেট
+    # 🔥 ফাইনাল ক্যাপশন 🔥
     caption = f"🎬 <b>{title}</b>\n\n" \
-              f"🎭 <b>Genre:</b> {formatted_tags}\n" \
+              f"🎭 <b>Genre:</b> {genre_text}\n" \
+              f"🔊 <b>Language:</b> {lang_text}\n" \
               f"💿 <b>Quality:</b> <code>HD-Rip | WEB-DL</code>\n" \
-              f"🔊 <b>Audio:</b> <code>Dual Audio | Multi</code>\n" \
-              f"─────────────────────\n" \
-              f"📥 <b>Fast High Speed Download</b>\n" \
-              f"👇 <i>Click the buttons below to start</i>"
-
-    # --- ডিজাইন মডিফিকেশন শেষ ---
+              f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n" \
+              f"📥 <b>Direct Fast Download Link</b>\n" \
+              f"👇 <i>Click the button below</i>"
 
     buttons = {
         "inline_keyboard": [
             [
-                {"text": "📥 Download Now", "url": link},
-                {"text": "▶️ Watch Online", "url": link}
+                {"text": "📥 Download Now", "url": final_link},
+                {"text": "▶️ Watch Online", "url": final_link}
             ],
             [
-                {"text": "📺 How to Download", "url": tutorial_link}
+                {"text": "📸 View Screenshots", "url": blog_link}
             ],
             [
-                {"text": "♻️ Share with Friends", "url": f"https://t.me/share/url?url={link}"}
+                {"text": "♻️ Share with Friends", "url": f"https://t.me/share/url?url={final_link}"}
             ]
         ]
     }
 
     payload = {
-        'chat_id': channel_id,
+        'chat_id': user_config['channel'],
         'caption': caption,
         'parse_mode': 'HTML',
         'reply_markup': json.dumps(buttons)
     }
 
     try:
-        # ছবি সহ পাঠানো
-        if image_url and image_url.startswith('http'):
-            payload['photo'] = image_url
-            r = requests.post(api_url_photo, data=payload)
-            if r.status_code == 200:
-                print(f"✅ Sent to {channel_id}: {title}")
-                return 
-
-        # ছবি ছাড়া ব্যাকআপ
-        payload.pop('photo', None)
-        payload['text'] = caption
-        requests.post(api_url_msg, data=payload)
-        print(f"✅ Sent Text to {channel_id}")
-
+        if poster:
+            payload['photo'] = poster
+            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto", data=payload)
+        else:
+            payload['text'] = caption
+            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data=payload)
+        print(f"✅ Sent: {title}")
     except Exception as e:
-        print(f"❌ Sending Error: {e}")
+        print(f"❌ Error: {e}")
 
-# === ইমেজ বের করার ফাংশন ===
-def get_high_quality_image(entry):
-    try:
-        content = entry.content[0].value
-        img_match = re.search(r'<img[^>]+src="([^">]+)"', content)
-        if img_match:
-            return img_match.group(1)
-        if 'media_thumbnail' in entry:
-            return entry.media_thumbnail[0]['url'].replace('s72-c', 's1600')
-    except:
-        pass
-    return None
-
-# === মেইন চেকিং লুপ ===
+# === মেইন লুপ ===
 def check_feeds_loop():
-    print("🤖 Multi-User Bot Started...")
     load_data()
-
     while True:
         try:
             for user_id, config in list(users_db.items()):
-                feed_url = config['feed']
-                last_link = config['last_link']
-                
-                try:
-                    feed = feedparser.parse(feed_url)
-                    if feed.entries:
-                        latest_post = feed.entries[0]
-                        current_link = latest_post.link
+                feed = feedparser.parse(config['feed'])
+                if feed.entries:
+                    post = feed.entries[0]
+                    link = post.link
+                    
+                    if config['last_link'] != link:
+                        content = post.content[0].value if 'content' in post else post.summary
                         
-                        if last_link and current_link != last_link:
-                            title = latest_post.title
-                            image_url = get_high_quality_image(latest_post)
-                            
-                            tags = "Multi Language"
-                            if 'tags' in latest_post:
-                                tags = ", ".join([t.term for t in latest_post.tags])
-
-                            print(f"🔥 New Post for {config['channel']}: {title}")
-                            send_to_telegram(user_id, title, current_link, image_url, tags)
-                            
-                            users_db[user_id]['last_link'] = current_link
-                            save_data()
+                        # আমরা এখন আর tags পাঠাচ্ছি না, কারণ সব HTML থেকেই নিবো
+                        send_to_telegram(user_id, post.title, link, content)
                         
-                        elif last_link is None:
-                            users_db[user_id]['last_link'] = current_link
-                            save_data()
-                            
-                except Exception as feed_err:
-                    print(f"Feed Error for {user_id}: {feed_err}")
-
+                        users_db[user_id]['last_link'] = link
+                        save_data()
             time.sleep(CHECK_INTERVAL)
-            
         except Exception as e:
-            print(f"Main Loop Error: {e}")
+            print(f"Loop Error: {e}")
             time.sleep(10)
-
-@app.route('/')
-def home():
-    return f"✅ Multi-User Bot Running! Active Users: {len(users_db)}"
 
 def run_bot():
     t1 = threading.Thread(target=check_feeds_loop)
@@ -230,5 +197,4 @@ def run_bot():
 
 if __name__ == "__main__":
     run_bot()
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=5000)
