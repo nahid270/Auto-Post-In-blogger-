@@ -35,9 +35,8 @@ def save_data():
     except:
         pass
 
-# === টাইটেল থেকে ল্যাঙ্গুয়েজ বের করার ফাংশন (নতুন যোগ করা হয়েছে) ===
+# === টাইটেল থেকে ল্যাঙ্গুয়েজ বের করার ফাংশন ===
 def get_language_from_title(title):
-    # ১. কমন ল্যাঙ্গুয়েজ কিওয়ার্ড লিস্ট
     keywords = [
         "Hindi", "English", "Bengali", "Tamil", "Telugu", 
         "Malayalam", "Kannada", "Dual Audio", "Multi Audio", 
@@ -46,21 +45,16 @@ def get_language_from_title(title):
     
     found_langs = []
     
-    # টাইটেল এর মধ্যে কিওয়ার্ড খোঁজা
     for k in keywords:
-        # Case Insensitive খোঁজা (ছোট বা বড় হাতের অক্ষর হলেও ধরবে)
         if re.search(r'\b' + re.escape(k) + r'\b', title, re.IGNORECASE):
-            # সুন্দর দেখানোর জন্য নাম ঠিক করা
             if k.lower() in ["hin", "hin-eng"]: 
                 k = "Hindi-English"
             found_langs.append(k)
 
-    # যদি কিওয়ার্ড পাওয়া যায়
     if found_langs:
         return " + ".join(found_langs)
     
-    # ২. যদি কিওয়ার্ড না পায়, কিন্তু ব্র্যাকেটের ভেতর কিছু থাকে যেমন [Dual]
-    match = re.search(r'\[([^0-9]+)\]', title) # সংখ্যা ছাড়া ব্র্যাকেট খুঁজবে
+    match = re.search(r'\[([^0-9]+)\]', title) 
     if match:
         return match.group(1).strip()
         
@@ -74,7 +68,7 @@ def parse_html_data(html_content):
         'poster': None,
         'download_link': None,
         'genre': 'Movie / Web Series', 
-        'language': 'Dual Audio [Hin-Eng]' # ডিফল্ট
+        'language': 'Dual Audio [Hin-Eng]'
     }
     
     try:
@@ -97,8 +91,6 @@ def parse_html_data(html_content):
         if genre_match:
             data['genre'] = genre_match.group(1).split('\n')[0].strip()
 
-        # নোট: Language এখন আমরা টাইটেল থেকেই বেশি প্রায়োরিটি দিব, 
-        # তবে HTML এ পাওয়া গেলে ব্যাকআপ হিসেবে রাখা হবে।
         lang_match = re.search(r'(?:Language|Audio)\s*[:|-]\s*(.*)', full_text, re.IGNORECASE)
         if lang_match:
             data['language'] = lang_match.group(1).split('\n')[0].strip()
@@ -128,15 +120,16 @@ def handle_commands():
                             if len(parts) >= 3:
                                 channel = parts[1]
                                 feed = parts[2]
+                                # টিউটোরিয়াল লিংক এখানে সেট হচ্ছে
                                 tutorial = parts[3] if len(parts) > 3 else "https://t.me/"
                                 users_db[chat_id] = {"channel": channel, "feed": feed, "tutorial": tutorial, "last_link": None}
                                 save_data()
                                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
-                                              data={'chat_id': chat_id, 'text': "✅ Setup Done!"})
+                                              data={'chat_id': chat_id, 'text': "✅ Setup Done with Tutorial Link!"})
         except:
             time.sleep(5)
 
-# === পোস্ট পাঠানোর ফাংশন (আপডেট করা হয়েছে) ===
+# === পোস্ট পাঠানোর ফাংশন (বাটন ঠিক করা হয়েছে) ===
 def send_to_telegram(user_id, title, blog_link, html_content):
     user_config = users_db.get(user_id)
     if not user_config: return
@@ -148,15 +141,17 @@ def send_to_telegram(user_id, title, blog_link, html_content):
     poster = extracted['poster']
     genre_text = extracted['genre']
     
-    # 🔥 ল্যাঙ্গুয়েজ লজিক ফিক্স 🔥
-    # প্রথমে টাইটেল চেক করবে, না পেলে HTML, না পেলে ডিফল্ট
+    # টিউটোরিয়াল লিংক ডাটাবেস থেকে নেওয়া
+    tutorial_link = user_config.get('tutorial', 'https://t.me/')
+    
+    # ল্যাঙ্গুয়েজ লজিক
     title_lang = get_language_from_title(title)
     if title_lang:
         lang_text = title_lang
     else:
         lang_text = extracted['language']
 
-    # 🔥 ফাইনাল ক্যাপশন 🔥
+    # ক্যাপশন
     caption = f"🎬 <b>{title}</b>\n\n" \
               f"🎭 <b>Genre:</b> {genre_text}\n" \
               f"🔊 <b>Language:</b> {lang_text}\n" \
@@ -165,14 +160,15 @@ def send_to_telegram(user_id, title, blog_link, html_content):
               f"📥 <b>Direct Fast Download Link</b>\n" \
               f"👇 <i>Click the button below</i>"
 
+    # 🔥 বাটন কনফিগারেশন আপডেট করা হয়েছে 🔥
     buttons = {
         "inline_keyboard": [
             [
-                {"text": "📥 Download Now", "url": final_link},
-                {"text": "▶️ Watch Online", "url": final_link}
+                {"text": "📥 Download Now", "url": final_link}
             ],
             [
-                {"text": "📸 View Screenshots", "url": blog_link}
+                # এখানে Screenshots এর বদলে আপনার সেট করা Tutorial লিংক বসবে
+                {"text": "📺 How to Download", "url": tutorial_link}
             ],
             [
                 {"text": "♻️ Share with Friends", "url": f"https://t.me/share/url?url={final_link}"}
@@ -212,7 +208,6 @@ def check_feeds_loop():
                     if config['last_link'] != link:
                         content = post.content[0].value if 'content' in post else post.summary
                         
-                        # টাইটেল সহ পাঠানো হচ্ছে
                         send_to_telegram(user_id, post.title, link, content)
                         
                         users_db[user_id]['last_link'] = link
