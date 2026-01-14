@@ -10,7 +10,7 @@ from flask import Flask
 import os
 
 # ================= কনফিগারেশন =================
-BOT_TOKEN = "8536336775:AAESxUalVaN4ABnzlgCdVLqa9dyGDwY_cUQ"
+BOT_TOKEN = "8445524502:AAEhI47vqsJprqt-DViJEPmaEjZJWIwvVjk"
 DATA_FILE = 'user_data.json'
 CHECK_INTERVAL = 60 
 # ============================================
