@@ -35,16 +35,46 @@ def save_data():
     except:
         pass
 
-# === HTML থেকে সব ডাটা (Link, Poster, Genre, Language) বের করার ফাংশন ===
+# === টাইটেল থেকে ল্যাঙ্গুয়েজ বের করার ফাংশন (নতুন যোগ করা হয়েছে) ===
+def get_language_from_title(title):
+    # ১. কমন ল্যাঙ্গুয়েজ কিওয়ার্ড লিস্ট
+    keywords = [
+        "Hindi", "English", "Bengali", "Tamil", "Telugu", 
+        "Malayalam", "Kannada", "Dual Audio", "Multi Audio", 
+        "Subtitles", "Hin-Eng", "Hin", "Eng"
+    ]
+    
+    found_langs = []
+    
+    # টাইটেল এর মধ্যে কিওয়ার্ড খোঁজা
+    for k in keywords:
+        # Case Insensitive খোঁজা (ছোট বা বড় হাতের অক্ষর হলেও ধরবে)
+        if re.search(r'\b' + re.escape(k) + r'\b', title, re.IGNORECASE):
+            # সুন্দর দেখানোর জন্য নাম ঠিক করা
+            if k.lower() in ["hin", "hin-eng"]: 
+                k = "Hindi-English"
+            found_langs.append(k)
+
+    # যদি কিওয়ার্ড পাওয়া যায়
+    if found_langs:
+        return " + ".join(found_langs)
+    
+    # ২. যদি কিওয়ার্ড না পায়, কিন্তু ব্র্যাকেটের ভেতর কিছু থাকে যেমন [Dual]
+    match = re.search(r'\[([^0-9]+)\]', title) # সংখ্যা ছাড়া ব্র্যাকেট খুঁজবে
+    if match:
+        return match.group(1).strip()
+        
+    return None
+
+# === HTML থেকে ডাটা বের করার ফাংশন ===
 def parse_html_data(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
     
-    # ডিফল্ট ডাটা
     data = {
         'poster': None,
         'download_link': None,
-        'genre': 'Movie / Web Series', # ডিফল্ট যদি না পায়
-        'language': 'Dual Audio [Hin-Eng]' # ডিফল্ট যদি না পায়
+        'genre': 'Movie / Web Series', 
+        'language': 'Dual Audio [Hin-Eng]' # ডিফল্ট
     }
     
     try:
@@ -60,22 +90,18 @@ def parse_html_data(html_content):
             if match:
                 data['download_link'] = base64.b64decode(match.group(1)).decode('utf-8')
 
-        # ৩. Genre এবং Language বের করা (HTML টেক্সট থেকে)
-        # আপনার HTML এ যদি লেখা থাকে "Genre: Action" বা "Language: Hindi" তাহলে এটা কাজ করবে
+        # ৩. Genre বের করা
         full_text = soup.get_text()
-        
-        # Regex দিয়ে খোঁজা হচ্ছে
         genre_match = re.search(r'(?:Genre|Category)\s*[:|-]\s*(.*)', full_text, re.IGNORECASE)
-        lang_match = re.search(r'(?:Language|Audio)\s*[:|-]\s*(.*)', full_text, re.IGNORECASE)
         
         if genre_match:
-            # অতিরিক্ত স্পেস বা লাইন ব্রেক থাকলে পরিষ্কার করা
-            clean_genre = genre_match.group(1).split('\n')[0].strip()
-            data['genre'] = clean_genre
-            
+            data['genre'] = genre_match.group(1).split('\n')[0].strip()
+
+        # নোট: Language এখন আমরা টাইটেল থেকেই বেশি প্রায়োরিটি দিব, 
+        # তবে HTML এ পাওয়া গেলে ব্যাকআপ হিসেবে রাখা হবে।
+        lang_match = re.search(r'(?:Language|Audio)\s*[:|-]\s*(.*)', full_text, re.IGNORECASE)
         if lang_match:
-            clean_lang = lang_match.group(1).split('\n')[0].strip()
-            data['language'] = clean_lang
+            data['language'] = lang_match.group(1).split('\n')[0].strip()
             
     except Exception as e:
         print(f"HTML Parsing Error: {e}")
@@ -110,18 +136,25 @@ def handle_commands():
         except:
             time.sleep(5)
 
-# === পোস্ট পাঠানোর ফাংশন ===
+# === পোস্ট পাঠানোর ফাংশন (আপডেট করা হয়েছে) ===
 def send_to_telegram(user_id, title, blog_link, html_content):
     user_config = users_db.get(user_id)
     if not user_config: return
 
-    # HTML থেকে সব ডাটা নেওয়া হচ্ছে
+    # HTML থেকে ডাটা নেওয়া
     extracted = parse_html_data(html_content)
     
     final_link = extracted['download_link'] if extracted['download_link'] else blog_link
     poster = extracted['poster']
     genre_text = extracted['genre']
-    lang_text = extracted['language']
+    
+    # 🔥 ল্যাঙ্গুয়েজ লজিক ফিক্স 🔥
+    # প্রথমে টাইটেল চেক করবে, না পেলে HTML, না পেলে ডিফল্ট
+    title_lang = get_language_from_title(title)
+    if title_lang:
+        lang_text = title_lang
+    else:
+        lang_text = extracted['language']
 
     # 🔥 ফাইনাল ক্যাপশন 🔥
     caption = f"🎬 <b>{title}</b>\n\n" \
@@ -179,7 +212,7 @@ def check_feeds_loop():
                     if config['last_link'] != link:
                         content = post.content[0].value if 'content' in post else post.summary
                         
-                        # আমরা এখন আর tags পাঠাচ্ছি না, কারণ সব HTML থেকেই নিবো
+                        # টাইটেল সহ পাঠানো হচ্ছে
                         send_to_telegram(user_id, post.title, link, content)
                         
                         users_db[user_id]['last_link'] = link
