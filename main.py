@@ -17,7 +17,7 @@ API_HASH = "297f51aaab99720a09e80273628c3c24"   # <--- আপনার API HASH
 BOT_TOKEN = "8156277951:AAFGsp5IhEhxK8ll2jqBBZQsjqk4hxjkPCQ"
 
 DATA_FILE = 'user_data.json'
-CHECK_INTERVAL = 15 
+CHECK_INTERVAL = 20 
 # ============================================
 
 app = Flask(__name__)
@@ -41,7 +41,7 @@ def save_data():
     except:
         pass
 
-# === [স্মার্ট ফিচার] পোস্টের ধরন চেক করার ফাংশন ===
+# === পোস্টের ধরন চেক করার ফাংশন ===
 def get_post_type(title):
     # এই শব্দগুলো থাকলে মুভি হিসেবে ধরবে
     movie_keywords = [
@@ -54,7 +54,7 @@ def get_post_type(title):
         if k.lower() in title.lower():
             return "MOVIE"
             
-    return "GENERAL"  # এগুলো না থাকলে সাধারণ পোস্ট
+    return "GENERAL"
 
 # === হেল্পার ফাংশন ===
 def get_language_from_title(title):
@@ -71,17 +71,14 @@ def parse_html_data(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
     data = {'poster': None, 'download_link': None, 'genre': 'N/A', 'language': 'N/A'}
     try:
-        # পোস্টার খোঁজা
-        img_tag = soup.find('img') # যেকোনো প্রথম ইমেজ নেবে
+        img_tag = soup.find('img')
         if img_tag: data['poster'] = img_tag.get('src')
         
-        # সিক্রেট লিংক খোঁজা
         btn = soup.find('button', class_='rgb-btn')
         if btn and 'onclick' in btn.attrs:
             match = re.search(r"secureLink\(this,\s*'([^']+)'", btn['onclick'])
             if match: data['download_link'] = base64.b64decode(match.group(1)).decode('utf-8')
 
-        # Genre & Language (শুধু মুভির জন্য কাজে লাগবে)
         full_text = soup.get_text()
         genre_match = re.search(r'(?:Genre|Category)\s*[:|-]\s*(.*)', full_text, re.IGNORECASE)
         if genre_match: data['genre'] = genre_match.group(1).split('\n')[0].strip()
@@ -138,13 +135,13 @@ async def remove_command(client, message):
         else:
             await message.reply_text("❌ Invalid index.")
 
-# ================== স্মার্ট পোস্ট সেন্ডার ==================
+# ================== পোস্ট সেন্ডার (বাটন ফিক্স করা হয়েছে) ==================
 async def send_post_async(setup, title, blog_link, html_content):
     extracted = parse_html_data(html_content)
     final_link = extracted['download_link'] if extracted['download_link'] else blog_link
     poster = extracted['poster']
+    tutorial_link = setup.get('tutorial', 'https://t.me/') # টিউটোরিয়াল লিংক
     
-    # ১. চেক করা পোস্টটি মুভি নাকি সাধারণ
     post_type = get_post_type(title)
 
     if post_type == "MOVIE":
@@ -158,10 +155,10 @@ async def send_post_async(setup, title, blog_link, html_content):
             f"📥 <b>Direct Fast Download Link</b>\n"
             f"👇 <i>Click the button below</i>"
         )
-        # মুভির বাটন
+        # মুভির বাটন (টিউটোরিয়াল সহ)
         buttons = [
             [InlineKeyboardButton("📥 Download Now", url=final_link)],
-            [InlineKeyboardButton("📺 How to Download", url=setup.get('tutorial', 'https://t.me/'))],
+            [InlineKeyboardButton("📺 How to Download", url=tutorial_link)], # <--- বাটন আছে
             [InlineKeyboardButton("♻️ Share", url=f"https://t.me/share/url?url={final_link}")]
         ]
 
@@ -173,9 +170,10 @@ async def send_post_async(setup, title, blog_link, html_content):
             f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
             f"👇 <i>Click below to view</i>"
         )
-        # সাধারণ বাটন
+        # সাধারণ পোস্টের বাটন (টিউটোরিয়াল সহ - এখানে অ্যাড করা হলো)
         buttons = [
             [InlineKeyboardButton("🔗 View Post / Watch Video", url=final_link)],
+            [InlineKeyboardButton("📺 How to Download", url=tutorial_link)], # <--- এই বাটনটি নতুন যুক্ত করা হলো
             [InlineKeyboardButton("♻️ Share", url=f"https://t.me/share/url?url={final_link}")]
         ]
 
