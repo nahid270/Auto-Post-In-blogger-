@@ -1,5 +1,7 @@
-feedparser
-requests
 flask
 gunicorn
+requests
+feedparser
 beautifulsoup4
+pyrogram
+tgcrypto
