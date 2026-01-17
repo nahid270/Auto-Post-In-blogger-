@@ -13,9 +13,9 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================= কনফিগারেশন =================
 # আপনার Rename-bot এর API ID এবং HASH এখানে ব্যবহার করবেন
-API_ID = 1234567          # <--- আপনার API ID দিন
-API_HASH = "your_api_hash_here"  # <--- আপনার API HASH দিন
-BOT_TOKEN = "8445524502:AAEhI47vqsJprqt-DViJEPmaEjZJWIwvVjk"
+API_ID = 29462738          # <--- আপনার API ID দিন
+API_HASH = "297f51aaab99720a09e80273628c3c24"  # <--- আপনার API HASH দিন
+BOT_TOKEN = "8156277951:AAFGsp5IhEhxK8ll2jqBBZQsjqk4hxjkPCQ"
 
 DATA_FILE = 'user_data.json'
 CHECK_INTERVAL = 60 
