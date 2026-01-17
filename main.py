@@ -12,18 +12,17 @@ from pyrogram import Client, filters, enums, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================= কনফিগারেশন =================
-API_ID = 29462738          # <--- আপনার API ID দিন
-API_HASH = "297f51aaab99720a09e80273628c3c24"  # <--- আপনার API HASH দিন
+# আপনার API তথ্যগুলো এখানে দিন
+API_ID = 29462738             
+API_HASH = "297f51aaab99720a09e80273628c3c24" 
 BOT_TOKEN = "8156277951:AAFGsp5IhEhxK8ll2jqBBZQsjqk4hxjkPCQ"
 
 DATA_FILE = 'user_data.json'
-CHECK_INTERVAL = 60 
+CHECK_INTERVAL = 15  # ঠিক ৬০ সেকেন্ড পর পর চেক করবে
 # ============================================
 
-# ক্লায়েন্ট সেটআপ
-bot = Client("AutoPostBotMulti", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-
 app = Flask(__name__)
+bot = Client("AutoPostBotMulti", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 users_db = {} 
 
 # === ডাটা লোড/সেভ ===
@@ -79,35 +78,30 @@ def parse_html_data(html_content):
     return data
 
 # ================== কমান্ড হ্যান্ডলার ==================
-
 @bot.on_message(filters.command("start"))
 async def start_command(client, message):
-    welcome_msg = (
-        "👋 <b>Welcome to Multi-Channel Auto Post Bot!</b>\n\n"
-        "➕ <b>নতুন সেটআপ:</b>\n"
-        "<code>/setup @ChannelUsername FeedLink TutorialLink</code>\n\n"
-        "📋 <b>লিস্ট দেখতে:</b> /status\n"
-        "🗑 <b>ডিলিট করতে:</b> /remove 1"
+    await message.reply_text(
+        "👋 <b>Welcome!</b>\n\n"
+        "✅ <b>Setup:</b> `/setup @Channel Link Tutorial`\n"
+        "📊 <b>Status:</b> `/status`",
+        parse_mode=enums.ParseMode.HTML
     )
-    await message.reply_text(welcome_msg, parse_mode=enums.ParseMode.HTML)
 
 @bot.on_message(filters.command("setup"))
 async def setup_command(client, message):
     chat_id = str(message.chat.id)
     parts = message.text.split()
-    
     if len(parts) >= 3:
-        channel = parts[1]
-        feed = parts[2]
+        channel, feed = parts[1], parts[2]
         tutorial = parts[3] if len(parts) > 3 else "https://t.me/"
-        
         new_entry = {"channel": channel, "feed": feed, "tutorial": tutorial, "last_link": None}
+        
         if chat_id not in users_db: users_db[chat_id] = []
         users_db[chat_id].append(new_entry)
         save_data()
-        await message.reply_text(f"✅ <b>Connection Added!</b>\n📢 {channel}")
+        await message.reply_text(f"✅ Setup Done for {channel}")
     else:
-        await message.reply_text("❌ Format: `/setup @Channel FeedLink TutorialLink`")
+        await message.reply_text("❌ Use: `/setup @Channel FeedLink TutorialLink`")
 
 @bot.on_message(filters.command("status"))
 async def status_command(client, message):
@@ -116,10 +110,9 @@ async def status_command(client, message):
     if not user_setups:
         await message.reply_text("❌ No setups found.")
         return
-    msg = "📊 <b>Channels:</b>\n\n"
-    for index, setup in enumerate(user_setups):
-        msg += f"<b>{index + 1}.</b> 📢 {setup['channel']}\n   🔗 {setup['feed']}\n"
-    msg += "\n🗑 Delete: `/remove 1`"
+    msg = "📊 <b>Connected:</b>\n"
+    for i, s in enumerate(user_setups):
+        msg += f"{i+1}. {s['channel']}\n"
     await message.reply_text(msg, parse_mode=enums.ParseMode.HTML)
 
 @bot.on_message(filters.command("remove"))
@@ -130,16 +123,16 @@ async def remove_command(client, message):
         index = int(parts[1]) - 1
         user_setups = users_db.get(chat_id, [])
         if 0 <= index < len(user_setups):
-            removed = user_setups.pop(index)
+            user_setups.pop(index)
             save_data()
-            await message.reply_text(f"🗑 Deleted: {removed['channel']}")
+            await message.reply_text("🗑 Removed.")
         else:
-            await message.reply_text("❌ Invalid number.")
+            await message.reply_text("❌ Invalid index.")
     else:
-        await message.reply_text("❌ Usage: `/remove 1`")
+        await message.reply_text("❌ Use: `/remove 1`")
 
-# ================== পোস্ট সেন্ডার ==================
-async def send_post_async(chat_id, setup, title, blog_link, html_content):
+# ================== পোস্ট সেন্ডার (Async) ==================
+async def send_post_async(setup, title, blog_link, html_content):
     extracted = parse_html_data(html_content)
     final_link = extracted['download_link'] if extracted['download_link'] else blog_link
     poster = extracted['poster']
@@ -161,23 +154,23 @@ async def send_post_async(chat_id, setup, title, blog_link, html_content):
     )
 
     try:
-        target_channel = setup['channel']
         if poster:
-            await bot.send_photo(target_channel, poster, caption=caption, reply_markup=keyboard)
+            await bot.send_photo(setup['channel'], poster, caption=caption, reply_markup=keyboard)
         else:
-            await bot.send_message(target_channel, caption, reply_markup=keyboard)
-        print(f"✅ Sent to {target_channel}: {title}")
+            await bot.send_message(setup['channel'], caption, reply_markup=keyboard)
+        print(f"✅ Sent: {title}")
     except Exception as e:
-        print(f"❌ Error sending to {target_channel}: {e}")
+        print(f"❌ Error: {e}")
 
-# ================== ফিড চেকার লুপ (FIXED) ==================
-def feed_checker():
-    load_data()
-    print("🔄 Multi-Feed Checker Started...")
-    
-    # ⚠️ আগে এখানে "with bot:" ছিল, যা ২য় বার বট স্টার্ট করত। এখন নেই।
+# ================== মেইন লুপ (Pure Async Loop) ==================
+async def checker_loop():
+    print("🔄 Checker Loop Started...")
     while True:
         try:
+            load_data()
+            if not users_db:
+                print("💤 No users to check...")
+            
             for user_id, setups in list(users_db.items()):
                 for setup in setups:
                     try:
@@ -187,35 +180,41 @@ def feed_checker():
                             link = post.link
                             
                             if setup.get('last_link') != link:
+                                print(f"✨ New Post Found: {post.title}")
                                 content = post.content[0].value if 'content' in post else post.summary
                                 
-                                # বট অলরেডি স্টার্ট আছে, তাই সরাসরি লুপ ব্যবহার করা হচ্ছে
-                                bot.loop.run_until_complete(
-                                    send_post_async(user_id, setup, post.title, link, content)
-                                )
+                                # পোস্ট সেন্ড করা
+                                await send_post_async(setup, post.title, link, content)
                                 
+                                # ডাটা আপডেট
                                 setup['last_link'] = link
                                 save_data()
                     except Exception as e:
-                        print(f"Feed Error: {e}")
-                        
+                        print(f"⚠️ Feed Error: {e}")
+            
+            # ঠিক ৬০ সেকেন্ড অপেক্ষা
+            await asyncio.sleep(CHECK_INTERVAL)
+
         except Exception as e:
-            print(f"Main Loop Error: {e}")
-        time.sleep(CHECK_INTERVAL)
+            print(f"❌ Main Loop Error: {e}")
+            await asyncio.sleep(10)
 
-# ================== মেইন রানার (FIXED) ==================
+# ================== প্রোগ্রাম রানার ==================
+async def main():
+    # ১. বট স্টার্ট
+    await bot.start()
+    print("⚡️ Bot Started!")
+
+    # ২. লুপ চালু করা (Background Task হিসেবে)
+    asyncio.create_task(checker_loop())
+    
+    # ৩. বট রানিং রাখা
+    await idle()
+    await bot.stop()
+
 if __name__ == "__main__":
-    # ১. আগে বট স্টার্ট হবে (ম্যানুয়ালি)
-    print("⚡️ Starting Bot Client...")
-    bot.start()
-
-    # ২. তারপর থ্রেডগুলো চালু হবে
-    threading.Thread(target=feed_checker, daemon=True).start()
+    # Flask আলাদা থ্রেডে (Web Server)
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5000), daemon=True).start()
     
-    # ৩. বট যাতে বন্ধ না হয়, তাই idle()
-    print("✅ Bot is Online & Running...")
-    idle()
-    
-    # ৪. বন্ধ করার সময়
-    bot.stop()
+    # মেইন Async ফাংশন রান
+    bot.run(main())
