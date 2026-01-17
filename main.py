@@ -100,7 +100,7 @@ def parse_html_data(html_content):
         
     return data
 
-# === টেলিগ্রাম কমান্ড হ্যান্ডলার ===
+# === টেলিগ্রাম কমান্ড হ্যান্ডলার (আপডেট করা হয়েছে) ===
 def handle_commands():
     offset = 0
     print("🎧 Bot Started...")
@@ -115,7 +115,40 @@ def handle_commands():
                         chat_id = str(u["message"]["chat"]["id"])
                         text = u["message"]["text"]
                         
-                        if text.startswith("/setup"):
+                        # --- ১. START কমান্ড ---
+                        if text == "/start":
+                            welcome_msg = (
+                                "👋 <b>Welcome to Auto Post Bot!</b>\n\n"
+                                "আমি আপনার ব্লগার ওয়েবসাইট থেকে নতুন পোস্ট অটোমেটিক টেলিগ্রাম চ্যানেলে সেন্ড করি।\n\n"
+                                "⚙️ <b>কিভাবে সেটআপ করবেন?</b>\n"
+                                "নিচের ফরম্যাটে কমান্ড দিন:\n"
+                                "<code>/setup @ChannelUsername FeedLink TutorialLink</code>\n\n"
+                                "উদাহরণ:\n"
+                                "<code>/setup @MyMovieChannel https://site.com/feeds/posts/default https://t.me/tutorial</code>\n\n"
+                                "📊 সেটিংস চেক করতে: /status লিখুন।"
+                            )
+                            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
+                                          data={'chat_id': chat_id, 'text': welcome_msg, 'parse_mode': 'HTML'})
+
+                        # --- ২. STATUS কমান্ড (সেটিংস দেখার জন্য) ---
+                        elif text == "/status":
+                            user_data = users_db.get(chat_id)
+                            if user_data:
+                                status_msg = (
+                                    "📊 <b>আপনার বর্তমান সেটিংস:</b>\n\n"
+                                    f"📢 <b>চ্যানেল:</b> {user_data['channel']}\n"
+                                    f"🔗 <b>ফিড লিংক:</b> {user_data['feed']}\n"
+                                    f"📺 <b>টিউটোরিয়াল:</b> {user_data['tutorial']}\n"
+                                    f"🔄 <b>লাস্ট পোস্ট লিংক:</b> {user_data.get('last_link', 'None')}"
+                                )
+                            else:
+                                status_msg = "❌ আপনার কোনো সেটআপ পাওয়া যায়নি। দয়া করে আগে /setup কমান্ড ব্যবহার করুন।"
+                            
+                            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
+                                          data={'chat_id': chat_id, 'text': status_msg, 'parse_mode': 'HTML'})
+
+                        # --- ৩. SETUP কমান্ড ---
+                        elif text.startswith("/setup"):
                             parts = text.split()
                             if len(parts) >= 3:
                                 channel = parts[1]
@@ -125,11 +158,15 @@ def handle_commands():
                                 users_db[chat_id] = {"channel": channel, "feed": feed, "tutorial": tutorial, "last_link": None}
                                 save_data()
                                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
-                                              data={'chat_id': chat_id, 'text': "✅ Setup Done with Tutorial Link!"})
-        except:
+                                              data={'chat_id': chat_id, 'text': "✅ <b>Setup Successful!</b>\nএখন থেকে নতুন পোস্ট অটোমেটিক চ্যানেলে যাবে।", 'parse_mode': 'HTML'})
+                            else:
+                                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", 
+                                              data={'chat_id': chat_id, 'text': "❌ ভুল ফরম্যাট! সঠিক ফরম্যাট:\n<code>/setup @Channel FeedLink TutorialLink</code>", 'parse_mode': 'HTML'})
+        except Exception as e:
+            print(f"Command Error: {e}")
             time.sleep(5)
 
-# === পোস্ট পাঠানোর ফাংশন (বাটন ঠিক করা হয়েছে) ===
+# === পোস্ট পাঠানোর ফাংশন ===
 def send_to_telegram(user_id, title, blog_link, html_content):
     user_config = users_db.get(user_id)
     if not user_config: return
@@ -160,14 +197,13 @@ def send_to_telegram(user_id, title, blog_link, html_content):
               f"📥 <b>Direct Fast Download Link</b>\n" \
               f"👇 <i>Click the button below</i>"
 
-    # 🔥 বাটন কনফিগারেশন আপডেট করা হয়েছে 🔥
+    # বাটন কনফিগারেশন
     buttons = {
         "inline_keyboard": [
             [
                 {"text": "📥 Download Now", "url": final_link}
             ],
             [
-                # এখানে Screenshots এর বদলে আপনার সেট করা Tutorial লিংক বসবে
                 {"text": "📺 How to Download", "url": tutorial_link}
             ],
             [
