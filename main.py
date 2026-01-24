@@ -12,9 +12,9 @@ from pyrogram import Client, filters, enums, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================= কনফিগারেশন =================
-API_ID = 29462738             # <--- আপনার API ID
-API_HASH = "297f51aaab99720a09e80273628c3c24"   # <--- আপনার API HASH
-BOT_TOKEN = "8156277951:AAFGsp5IhEhxK8ll2jqBBZQsjqk4hxjkPCQ"
+API_ID = 19234664             # <--- আপনার API ID
+API_HASH = "29c2f3b3d115cf1b0231d816deb271f5"   # <--- আপনার API HASH
+BOT_TOKEN = "8550876774:AAH9BC7oguSWhC9h7JfevDc1B4psBkW2jq4"
 
 DATA_FILE = 'user_data.json'
 CHECK_INTERVAL = 20 
