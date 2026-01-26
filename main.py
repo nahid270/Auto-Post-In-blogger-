@@ -5,221 +5,239 @@ import json
 import re
 import base64
 import os
-import time
+import logging
 from bs4 import BeautifulSoup
 from flask import Flask
 from pyrogram import Client, filters, enums, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================= কনফিগারেশন =================
-API_ID = 19234664             # <--- আপনার API ID
-API_HASH = "29c2f3b3d115cf1b0231d816deb271f5"   # <--- আপনার API HASH
+API_ID = 19234664
+API_HASH = "29c2f3b3d115cf1b0231d816deb271f5"
 BOT_TOKEN = "8550876774:AAH9BC7oguSWhC9h7JfevDc1B4psBkW2jq4"
 
-DATA_FILE = 'user_data.json'
-CHECK_INTERVAL = 60 
+DATA_FILE = 'bot_config.json'
+CHECK_INTERVAL = 30  # প্রতি ৬০ সেকেন্ডে চেক করবে
 # ============================================
 
+# লগিং (ডিবাগিং এর জন্য)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("SimpleAutoPost")
+
 app = Flask(__name__)
-bot = Client("AutoPostBotSmart", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+bot = Client("SimpleAutoPostBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 users_db = {} 
 
-# === ডাটা লোড/সেভ ===
+# === হেলথ চেক ===
+@app.route('/')
+def status():
+    return "✅ Bot is Running!"
+
+# === ডাটাবেস হ্যান্ডলিং ===
 def load_data():
     global users_db
     try:
         if os.path.exists(DATA_FILE):
             with open(DATA_FILE, 'r') as f:
                 users_db = json.load(f)
+        else:
+            users_db = {}
     except:
         users_db = {}
 
 def save_data():
     try:
         with open(DATA_FILE, 'w') as f:
-            json.dump(users_db, f)
+            json.dump(users_db, f, indent=4)
     except:
         pass
 
-# === পোস্টের ধরন চেক করার ফাংশন ===
-def get_post_type(title):
-    # এই শব্দগুলো থাকলে মুভি হিসেবে ধরবে
-    movie_keywords = [
-        "480p", "720p", "1080p", "Movie", "Season", "Episode", 
-        "Dual Audio", "Web Series", "BluRay", "HDRip", "WEB-DL", 
-        "Hindi", "Netflix", "Amazon", "Dubbed"
-    ]
-    
-    for k in movie_keywords:
-        if k.lower() in title.lower():
-            return "MOVIE"
-            
-    return "GENERAL"
-
 # === হেল্পার ফাংশন ===
-def get_language_from_title(title):
-    keywords = ["Hindi", "English", "Bengali", "Tamil", "Telugu", "Dual Audio", "Hin-Eng"]
-    found_langs = []
-    for k in keywords:
-        if re.search(r'\b' + re.escape(k) + r'\b', title, re.IGNORECASE):
-            if k.lower() in ["hin", "hin-eng"]: k = "Hindi-English"
-            found_langs.append(k)
-    if found_langs: return " + ".join(found_langs)
-    return None
+def clean_url(url):
+    # লিংকের শেষে ?m=1 বা #comment থাকলে রিমুভ করে ক্লিন লিংক বানাবে
+    return url.split('?')[0].split('#')[0]
 
-def parse_html_data(html_content):
+def parse_html(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
-    data = {'poster': None, 'download_link': None, 'genre': 'N/A', 'language': 'N/A'}
-    try:
-        img_tag = soup.find('img')
-        if img_tag: data['poster'] = img_tag.get('src')
-        
-        btn = soup.find('button', class_='rgb-btn')
-        if btn and 'onclick' in btn.attrs:
+    data = {'poster': None, 'd_link': None, 'genre': 'N/A'}
+    
+    img = soup.find('img')
+    if img: data['poster'] = img.get('src')
+    
+    btn = soup.find('button', class_='rgb-btn')
+    if btn and 'onclick' in btn.attrs:
+        try:
             match = re.search(r"secureLink\(this,\s*'([^']+)'", btn['onclick'])
-            if match: data['download_link'] = base64.b64decode(match.group(1)).decode('utf-8')
-
-        full_text = soup.get_text()
-        genre_match = re.search(r'(?:Genre|Category)\s*[:|-]\s*(.*)', full_text, re.IGNORECASE)
-        if genre_match: data['genre'] = genre_match.group(1).split('\n')[0].strip()
-
-        lang_match = re.search(r'(?:Language|Audio)\s*[:|-]\s*(.*)', full_text, re.IGNORECASE)
-        if lang_match: data['language'] = lang_match.group(1).split('\n')[0].strip()
-    except Exception as e:
-        pass
+            if match:
+                data['d_link'] = base64.b64decode(match.group(1)).decode('utf-8')
+        except: pass
+        
+    text = soup.get_text()
+    g_match = re.search(r'(?:Genre|Category)\s*[:|-]\s*(.*)', text, re.IGNORECASE)
+    if g_match: data['genre'] = g_match.group(1).split('\n')[0].strip()
+    
     return data
 
-# ================== কমান্ড হ্যান্ডলার ==================
+# ================== কমান্ডস ==================
 @bot.on_message(filters.command("start"))
-async def start_command(client, message):
-    await message.reply_text("👋 <b>Smart Auto Post Bot!</b>\nমুভি এবং ভাইরাল পোস্ট আলাদাভাবে ডিটেক্ট করতে পারে।")
+async def start(client, message):
+    await message.reply_text("👋 <b>বট রেডি!</b>\n\nচ্যানেল কানেক্ট করতে:\n`/setup @ChannelUsername FeedLink`\n\nনোট: কানেক্ট করার পর <b>নতুন</b> যা পোস্ট করবেন শুধু সেটাই চ্যানেলে যাবে।")
 
 @bot.on_message(filters.command("setup"))
-async def setup_command(client, message):
+async def setup(client, message):
     chat_id = str(message.chat.id)
     parts = message.text.split()
+    
     if len(parts) >= 3:
-        channel, feed = parts[1], parts[2]
+        channel = parts[1]
+        feed_url = parts[2]
         tutorial = parts[3] if len(parts) > 3 else "https://t.me/"
-        new_entry = {"channel": channel, "feed": feed, "tutorial": tutorial, "last_link": None}
-        if chat_id not in users_db: users_db[chat_id] = []
-        users_db[chat_id].append(new_entry)
-        save_data()
-        await message.reply_text(f"✅ Setup Done for {channel}")
+        
+        try:
+            # ১. সেটআপের সময়ই ফিড চেক করে লেটেস্ট পোস্টের আইডি নিয়ে নেওয়া হচ্ছে
+            feed = feedparser.parse(feed_url)
+            last_known_id = None
+            
+            if feed.entries:
+                # লেটেস্ট পোস্টের ID সেভ করে রাখলাম যাতে এটা আর সেন্ড না করে
+                post = feed.entries[0]
+                last_known_id = post.id if 'id' in post else clean_url(post.link)
+            
+            new_config = {
+                "channel": channel,
+                "feed": feed_url,
+                "tutorial": tutorial,
+                "last_id": last_known_id # এই আইডি বা এর আগের গুলো আর সেন্ড হবে না
+            }
+            
+            if chat_id not in users_db: users_db[chat_id] = []
+            
+            # মাল্টিপল চ্যানেল সাপোর্ট: নতুন কনফিগারেশন লিস্টে যোগ করা হলো
+            users_db[chat_id].append(new_config)
+            save_data()
+            
+            await message.reply_text(f"✅ <b>Setup Done!</b>\nConnected: {channel}\n\nএখন থেকে ব্লগারে নতুন পোস্ট করলে অটোমেটিক যাবে।")
+            
+        except Exception as e:
+            await message.reply_text(f"❌ Error: {e}")
     else:
-        await message.reply_text("❌ Use: `/setup @Channel FeedLink TutorialLink`")
+        await message.reply_text("❌ নিয়ম: `/setup @Channel FeedLink [Tutorial]`")
 
 @bot.on_message(filters.command("status"))
-async def status_command(client, message):
+async def status_cmd(client, message):
     chat_id = str(message.chat.id)
-    user_setups = users_db.get(chat_id, [])
-    if not user_setups:
-        await message.reply_text("❌ No setups found.")
-        return
-    msg = "📊 <b>Connected:</b>\n"
-    for i, s in enumerate(user_setups):
-        msg += f"{i+1}. {s['channel']}\n"
-    await message.reply_text(msg, parse_mode=enums.ParseMode.HTML)
+    if chat_id in users_db and users_db[chat_id]:
+        msg = "📋 <b>আপনার কানেক্ট করা চ্যানেলসমূহ:</b>\n"
+        for i, conf in enumerate(users_db[chat_id]):
+            msg += f"{i+1}. {conf['channel']}\n"
+        await message.reply_text(msg)
+    else:
+        await message.reply_text("❌ কোনো চ্যানেল সেটআপ করা নেই।")
 
 @bot.on_message(filters.command("remove"))
-async def remove_command(client, message):
+async def remove_cmd(client, message):
+    # চ্যানেল রিমুভ করার কমান্ড
     chat_id = str(message.chat.id)
     parts = message.text.split()
     if len(parts) == 2 and parts[1].isdigit():
-        index = int(parts[1]) - 1
-        user_setups = users_db.get(chat_id, [])
-        if 0 <= index < len(user_setups):
-            user_setups.pop(index)
+        idx = int(parts[1]) - 1
+        if chat_id in users_db and 0 <= idx < len(users_db[chat_id]):
+            removed = users_db[chat_id].pop(idx)
             save_data()
-            await message.reply_text("🗑 Removed.")
+            await message.reply_text(f"🗑 রিমুভ করা হয়েছে: {removed['channel']}")
         else:
-            await message.reply_text("❌ Invalid index.")
-
-# ================== পোস্ট সেন্ডার (বাটন ফিক্স করা হয়েছে) ==================
-async def send_post_async(setup, title, blog_link, html_content):
-    extracted = parse_html_data(html_content)
-    final_link = extracted['download_link'] if extracted['download_link'] else blog_link
-    poster = extracted['poster']
-    tutorial_link = setup.get('tutorial', 'https://t.me/') # টিউটোরিয়াল লিংক
-    
-    post_type = get_post_type(title)
-
-    if post_type == "MOVIE":
-        # === মুভি টেমপ্লেট ===
-        caption = (
-            f"🎬 <b>{title}</b>\n\n"
-            f"🎭 <b>Genre:</b> {extracted['genre']}\n"
-            f"🔊 <b>Language:</b> {get_language_from_title(title) or extracted['language']}\n"
-            f"💿 <b>Quality:</b> <code>HD-Rip | WEB-DL</code>\n"
-            f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-            f"📥 <b>Direct Fast Download Link</b>\n"
-            f"👇 <i>Click the button below</i>"
-        )
-        # মুভির বাটন (টিউটোরিয়াল সহ)
-        buttons = [
-            [InlineKeyboardButton("📥 Download Now", url=final_link)],
-            [InlineKeyboardButton("📺 How to Download", url=tutorial_link)], # <--- বাটন আছে
-            [InlineKeyboardButton("♻️ Share", url=f"https://t.me/share/url?url={final_link}")]
-        ]
-
+            await message.reply_text("❌ ভুল ইনডেক্স। /status চেক করুন।")
     else:
-        # === সাধারণ/ভাইরাল পোস্ট টেমপ্লেট ===
-        caption = (
-            f"🔥 <b>{title}</b>\n\n"
-            f"👀 <i>Check out this latest update!</i>\n"
-            f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-            f"👇 <i>Click below to view</i>"
-        )
-        # সাধারণ পোস্টের বাটন (টিউটোরিয়াল সহ - এখানে অ্যাড করা হলো)
-        buttons = [
-            [InlineKeyboardButton("🔗 View Post / Watch Video", url=final_link)],
-            [InlineKeyboardButton("📺 How to Download", url=tutorial_link)], # <--- এই বাটনটি নতুন যুক্ত করা হলো
-            [InlineKeyboardButton("♻️ Share", url=f"https://t.me/share/url?url={final_link}")]
-        ]
+        await message.reply_text("❌ নিয়ম: `/remove 1` (এখানে 1 হলো লিস্ট নাম্বার)")
 
-    keyboard = InlineKeyboardMarkup(buttons)
-
+# ================== পোস্ট সেন্ডার ==================
+async def send_post(config, entry):
+    title = entry.title
+    link = clean_url(entry.link)
+    content = entry.content[0].value if 'content' in entry else entry.summary
+    
+    meta = parse_html(content)
+    final_link = meta['d_link'] if meta['d_link'] else link
+    
+    # ক্যাপশন তৈরি
+    caption = (
+        f"🔥 <b>{title}</b>\n\n"
+        f"🎭 <b>Genre:</b> {meta['genre']}\n"
+        f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+        f"📥 <b>Download / View Post</b>\n"
+        f"👇 <i>Click the button below</i>"
+    )
+    
+    buttons = [
+        [InlineKeyboardButton("🔗 View / Download", url=final_link)],
+        [InlineKeyboardButton("📺 Tutorial", url=config['tutorial'])]
+    ]
+    
     try:
-        if poster:
-            await bot.send_photo(setup['channel'], poster, caption=caption, reply_markup=keyboard)
+        if meta['poster']:
+            await bot.send_photo(config['channel'], meta['poster'], caption=caption, reply_markup=InlineKeyboardMarkup(buttons))
         else:
-            await bot.send_message(setup['channel'], caption, reply_markup=keyboard)
-        print(f"✅ Sent ({post_type}): {title}")
+            await bot.send_message(config['channel'], caption, reply_markup=InlineKeyboardMarkup(buttons))
+        logger.info(f"Sent: {title}")
+        return True
     except Exception as e:
-        print(f"❌ Error: {e}")
+        logger.error(f"Failed to send to {config['channel']}: {e}")
+        return False
 
 # ================== মেইন লুপ ==================
 async def checker_loop():
-    print("🔄 Smart Checker Loop Started...")
+    logger.info("🔄 Checker Loop Started...")
+    load_data()
+    
     while True:
         try:
-            load_data()
-            for user_id, setups in list(users_db.items()):
-                for setup in setups:
+            changes = False
+            for user_id, configs in users_db.items():
+                for config in configs:
                     try:
-                        feed = feedparser.parse(setup['feed'])
-                        if feed.entries:
-                            post = feed.entries[0]
-                            link = post.link
+                        feed = feedparser.parse(config['feed'])
+                        if not feed.entries: continue
+                        
+                        # আমরা ফিডের পোস্ট চেক করব
+                        # কিন্তু লজিক হলো: যতক্ষণ না পুরনো 'last_id' পাচ্ছি, ততক্ষণ পর্যন্ত নতুন পোস্ট
+                        
+                        new_posts = []
+                        last_id = config.get('last_id')
+                        
+                        # প্রথম ৫টি পোস্ট চেক করি (যাতে একসাথে একাধিক পোস্ট দিলেও মিস না হয়)
+                        for entry in feed.entries[:5]:
+                            uid = entry.id if 'id' in entry else clean_url(entry.link)
                             
-                            if setup.get('last_link') != link:
-                                print(f"✨ New Post: {post.title}")
-                                content = post.content[0].value if 'content' in post else post.summary
-                                
-                                await send_post_async(setup, post.title, link, content)
-                                
-                                setup['last_link'] = link
-                                save_data()
+                            if uid == last_id:
+                                break # পুরনো পোস্ট পেয়ে গেছি, আর খোঁজার দরকার নেই
+                            
+                            new_posts.append((entry, uid))
+                        
+                        # new_posts লিস্টে এখন সব নতুন পোস্ট আছে
+                        # কিন্তু এগুলো রিভার্স করতে হবে যাতে আগেরটা আগে পোস্ট হয়
+                        if new_posts:
+                            for entry, uid in reversed(new_posts):
+                                success = await send_post(config, entry)
+                                if success:
+                                    # সাকসেস হলে last_id আপডেট করে দাও
+                                    config['last_id'] = uid
+                                    changes = True
+                                    await asyncio.sleep(2) # এক সাথে অনেক পোস্ট হলে একটু গ্যাপ দেবে
+                                    
                     except Exception as e:
-                        print(f"Feed Error: {e}")
+                        logger.error(f"Feed Error: {e}")
+            
+            if changes:
+                save_data()
+            
             await asyncio.sleep(CHECK_INTERVAL)
+            
         except Exception as e:
-            print(f"Loop Error: {e}")
+            logger.error(f"Loop Error: {e}")
             await asyncio.sleep(10)
 
 async def main():
     await bot.start()
-    print("⚡️ Smart Bot Started!")
     asyncio.create_task(checker_loop())
     await idle()
     await bot.stop()
