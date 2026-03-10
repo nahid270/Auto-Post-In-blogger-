@@ -59,7 +59,6 @@ def clean_url(url):
 def parse_html(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
     
-    # ডিফল্ট ডাটা স্ট্রাকচার (যেগুলো না পেলে N/A দেখাবে না, বরং হাইড করে দিবে)
     data = {
         'poster': None, 
         'd_link': None, 
@@ -68,12 +67,16 @@ def parse_html(html_content):
         'quality': None,
         'size': None,
         'year': None,
-        'rating': None
+        'rating': None,
+        'story': None
     }
     
-    # ১. ইমেজ বের করা
-    img = soup.find('img')
-    if img: data['poster'] = img.get('src')
+    # ১. ইমেজ বের করা (আপনার ক্লাসের নাম 'poster-img')
+    img = soup.find('img', class_='poster-img')
+    if img: 
+        data['poster'] = img.get('src')
+    elif soup.find('img'): # ব্যাকআপ
+        data['poster'] = soup.find('img').get('src')
     
     # ২. ডাইরেক্ট ডাউনলোড লিংক বের করা
     btn = soup.find('button', class_='rgb-btn')
@@ -84,33 +87,32 @@ def parse_html(html_content):
                 data['d_link'] = base64.b64decode(match.group(1)).decode('utf-8')
         except: pass
         
-    # ৩. ওয়েবসাইট থেকে ডিটেলস বের করার জন্য রেগুলার এক্সপ্রেশন
-    text = soup.get_text(separator='\n') # HTML ট্যাগ মুছে লাইন বাই লাইন টেক্সট নিবে
+    # ৩. আপনার HIDDEN METADATA থেকে ডাটা বের করা
+    genre_div = soup.find('div', id='meta-genre')
+    if genre_div: data['genre'] = genre_div.text.strip()
     
-    # কোন কোন জিনিস খুঁজবে তার লিস্ট (আপনি ব্লগারে যেভাবে লিখবেন, সেই নামগুলো এখানে দেওয়া আছে)
-    patterns = {
-        'genre': r'(?:Genre|Category|ধরন)\s*[:|-]\s*(.*)',
-        'language': r'(?:Language|Audio|ভাষা)\s*[:|-]\s*(.*)',
-        'quality': r'(?:Quality|Resolution|কোয়ালিটি)\s*[:|-]\s*(.*)',
-        'size': r'(?:Size|File Size|সাইজ)\s*[:|-]\s*(.*)',
-        'year': r'(?:Year|Release Year|রিলিজ)\s*[:|-]\s*(.*)',
-        'rating': r'(?:IMDb|Rating|রেটিং)\s*[:|-]\s*(.*)'
-    }
+    lang_div = soup.find('div', id='meta-language')
+    if lang_div: data['language'] = lang_div.text.strip()
     
-    for key, pattern in patterns.items():
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            # ডাটা পেয়ে গেলে সেটা সুন্দর করে সেভ করবে
-            extracted_text = match.group(1).split('\n')[0].strip()
-            if extracted_text:
-                data[key] = extracted_text
-                
+    quality_div = soup.find('div', id='meta-quality')
+    if quality_div: data['quality'] = quality_div.text.strip()
+
+    size_div = soup.find('div', id='meta-size')
+    if size_div: data['size'] = size_div.text.strip()
+    
+    # স্টোরি বা প্যারাগ্রাফ বের করা
+    p_tag = soup.find('p')
+    if p_tag:
+        text = p_tag.text.strip()
+        # স্টোরি যদি অনেক বড় হয়, কেটে ছোট করে দিবে
+        data['story'] = text[:150] + "..." if len(text) > 150 else text
+
     return data
 
 # ================== কমান্ডস ==================
 @bot.on_message(filters.command("start"))
 async def start(client, message):
-    await message.reply_text("👋 <b>বট রেডি!</b>\n\nচ্যানেল কানেক্ট করতে:\n`/setup @ChannelUsername FeedLink`\n\nনোট: কানেক্ট করার পর <b>নতুন</b> যা পোস্ট করবেন শুধু সেটাই চ্যানেলে যাবে।")
+    await message.reply_text("👋 <b>বট রেডি!</b>\n\nচ্যানেল কানেক্ট করতে:\n`/setup @ChannelUsername FeedLink`")
 
 @bot.on_message(filters.command("setup"))
 async def setup(client, message):
@@ -141,8 +143,7 @@ async def setup(client, message):
             
             users_db[chat_id].append(new_config)
             save_data()
-            
-            await message.reply_text(f"✅ <b>Setup Done!</b>\nConnected: {channel}\n\nএখন থেকে ব্লগারে নতুন পোস্ট করলে অটোমেটিক যাবে।")
+            await message.reply_text(f"✅ <b>Setup Done!</b>\nConnected: {channel}")
             
         except Exception as e:
             await message.reply_text(f"❌ Error: {e}")
@@ -173,35 +174,48 @@ async def remove_cmd(client, message):
         else:
             await message.reply_text("❌ ভুল ইনডেক্স। /status চেক করুন।")
     else:
-        await message.reply_text("❌ নিয়ম: `/remove 1` (এখানে 1 হলো লিস্ট নাম্বার)")
+        await message.reply_text("❌ নিয়ম: `/remove 1`")
 
 # ================== পোস্ট সেন্ডার ==================
 async def send_post(config, entry):
-    title = entry.title
+    # টাইটেল থেকে অপ্রয়োজনীয় জিনিস ক্লিন করা
+    raw_title = entry.title
+    clean_title = re.sub(r'\[.*?\]', '', raw_title).strip() # [Hindi] এগুলো টাইটেল থেকে সরাবে
+    
     link = clean_url(entry.link)
     content = entry.content[0].value if 'content' in entry else entry.summary
     
     meta = parse_html(content)
     final_link = meta['d_link'] if meta['d_link'] else link
     
+    # 타이টেল থেকে Year এবং Quality বের করার স্মার্ট লজিক
+    year_match = re.search(r'\b(19\d{2}|20\d{2})\b', raw_title)
+    if year_match and not meta['year']: 
+        meta['year'] = year_match.group(1)
+        
+    q_match = re.search(r'\b(480p|720p|1080p|2160p|4K)\b', raw_title, re.IGNORECASE)
+    if q_match and not meta['quality']: 
+        meta['quality'] = q_match.group(1).upper()
+    
     # ================== ডাইনামিক ক্যাপশন তৈরি ==================
-    caption = f"🎬 <b>{title}</b>\n\n"
+    caption = f"🎬 <b>{clean_title}</b>\n\n"
     
     if meta['year']:     caption += f"📅 <b>Year:</b> {meta['year']}\n"
+    if meta['language']: caption += f"🗣 <b>Audio:</b> {meta['language']}\n"
     if meta['genre']:    caption += f"🎭 <b>Genre:</b> {meta['genre']}\n"
-    if meta['language']: caption += f"🗣 <b>Language:</b> {meta['language']}\n"
     if meta['quality']:  caption += f"💿 <b>Quality:</b> {meta['quality']}\n"
     if meta['size']:     caption += f"💾 <b>Size:</b> {meta['size']}\n"
-    if meta['rating']:   caption += f"⭐ <b>IMDb:</b> {meta['rating']}\n"
     
+    if meta['story']:
+        caption += f"\n📖 <b>Storyline:</b> <i>{meta['story']}</i>\n"
+        
     caption += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
     caption += f"📥 <b>Download / View Post</b>\n"
     caption += f"👇 <i>Click the button below</i>"
     # ==========================================================
 
     buttons = [
-        [InlineKeyboardButton("🔗 View / Download Now", url=final_link)],
-        [InlineKeyboardButton("📺 How to Download?", url=config['tutorial'])]
+        [InlineKeyboardButton("🔗 Download Now", url=final_link)],[InlineKeyboardButton("📺 How to Download", url=config['tutorial'])]
     ]
     
     try:
@@ -209,7 +223,7 @@ async def send_post(config, entry):
             await bot.send_photo(config['channel'], meta['poster'], caption=caption, reply_markup=InlineKeyboardMarkup(buttons))
         else:
             await bot.send_message(config['channel'], caption, reply_markup=InlineKeyboardMarkup(buttons))
-        logger.info(f"Sent: {title}")
+        logger.info(f"Sent: {clean_title}")
         return True
     except Exception as e:
         logger.error(f"Failed to send to {config['channel']}: {e}")
