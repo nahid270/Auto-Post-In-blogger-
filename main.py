@@ -54,16 +54,28 @@ def save_data():
 
 # === হেল্পার ফাংশন ===
 def clean_url(url):
-    # লিংকের শেষে ?m=1 বা #comment থাকলে রিমুভ করে ক্লিন লিংক বানাবে
     return url.split('?')[0].split('#')[0]
 
 def parse_html(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
-    data = {'poster': None, 'd_link': None, 'genre': 'N/A'}
     
+    # ডিফল্ট ডাটা স্ট্রাকচার (যেগুলো না পেলে N/A দেখাবে না, বরং হাইড করে দিবে)
+    data = {
+        'poster': None, 
+        'd_link': None, 
+        'genre': None,
+        'language': None,
+        'quality': None,
+        'size': None,
+        'year': None,
+        'rating': None
+    }
+    
+    # ১. ইমেজ বের করা
     img = soup.find('img')
     if img: data['poster'] = img.get('src')
     
+    # ২. ডাইরেক্ট ডাউনলোড লিংক বের করা
     btn = soup.find('button', class_='rgb-btn')
     if btn and 'onclick' in btn.attrs:
         try:
@@ -72,10 +84,27 @@ def parse_html(html_content):
                 data['d_link'] = base64.b64decode(match.group(1)).decode('utf-8')
         except: pass
         
-    text = soup.get_text()
-    g_match = re.search(r'(?:Genre|Category)\s*[:|-]\s*(.*)', text, re.IGNORECASE)
-    if g_match: data['genre'] = g_match.group(1).split('\n')[0].strip()
+    # ৩. ওয়েবসাইট থেকে ডিটেলস বের করার জন্য রেগুলার এক্সপ্রেশন
+    text = soup.get_text(separator='\n') # HTML ট্যাগ মুছে লাইন বাই লাইন টেক্সট নিবে
     
+    # কোন কোন জিনিস খুঁজবে তার লিস্ট (আপনি ব্লগারে যেভাবে লিখবেন, সেই নামগুলো এখানে দেওয়া আছে)
+    patterns = {
+        'genre': r'(?:Genre|Category|ধরন)\s*[:|-]\s*(.*)',
+        'language': r'(?:Language|Audio|ভাষা)\s*[:|-]\s*(.*)',
+        'quality': r'(?:Quality|Resolution|কোয়ালিটি)\s*[:|-]\s*(.*)',
+        'size': r'(?:Size|File Size|সাইজ)\s*[:|-]\s*(.*)',
+        'year': r'(?:Year|Release Year|রিলিজ)\s*[:|-]\s*(.*)',
+        'rating': r'(?:IMDb|Rating|রেটিং)\s*[:|-]\s*(.*)'
+    }
+    
+    for key, pattern in patterns.items():
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            # ডাটা পেয়ে গেলে সেটা সুন্দর করে সেভ করবে
+            extracted_text = match.group(1).split('\n')[0].strip()
+            if extracted_text:
+                data[key] = extracted_text
+                
     return data
 
 # ================== কমান্ডস ==================
@@ -94,12 +123,10 @@ async def setup(client, message):
         tutorial = parts[3] if len(parts) > 3 else "https://t.me/"
         
         try:
-            # ১. সেটআপের সময়ই ফিড চেক করে লেটেস্ট পোস্টের আইডি নিয়ে নেওয়া হচ্ছে
             feed = feedparser.parse(feed_url)
             last_known_id = None
             
             if feed.entries:
-                # লেটেস্ট পোস্টের ID সেভ করে রাখলাম যাতে এটা আর সেন্ড না করে
                 post = feed.entries[0]
                 last_known_id = post.id if 'id' in post else clean_url(post.link)
             
@@ -107,12 +134,11 @@ async def setup(client, message):
                 "channel": channel,
                 "feed": feed_url,
                 "tutorial": tutorial,
-                "last_id": last_known_id # এই আইডি বা এর আগের গুলো আর সেন্ড হবে না
+                "last_id": last_known_id
             }
             
             if chat_id not in users_db: users_db[chat_id] = []
             
-            # মাল্টিপল চ্যানেল সাপোর্ট: নতুন কনফিগারেশন লিস্টে যোগ করা হলো
             users_db[chat_id].append(new_config)
             save_data()
             
@@ -136,7 +162,6 @@ async def status_cmd(client, message):
 
 @bot.on_message(filters.command("remove"))
 async def remove_cmd(client, message):
-    # চ্যানেল রিমুভ করার কমান্ড
     chat_id = str(message.chat.id)
     parts = message.text.split()
     if len(parts) == 2 and parts[1].isdigit():
@@ -159,18 +184,24 @@ async def send_post(config, entry):
     meta = parse_html(content)
     final_link = meta['d_link'] if meta['d_link'] else link
     
-    # ক্যাপশন তৈরি
-    caption = (
-        f"🔥 <b>{title}</b>\n\n"
-        f"🎭 <b>Genre:</b> {meta['genre']}\n"
-        f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-        f"📥 <b>Download / View Post</b>\n"
-        f"👇 <i>Click the button below</i>"
-    )
+    # ================== ডাইনামিক ক্যাপশন তৈরি ==================
+    caption = f"🎬 <b>{title}</b>\n\n"
     
+    if meta['year']:     caption += f"📅 <b>Year:</b> {meta['year']}\n"
+    if meta['genre']:    caption += f"🎭 <b>Genre:</b> {meta['genre']}\n"
+    if meta['language']: caption += f"🗣 <b>Language:</b> {meta['language']}\n"
+    if meta['quality']:  caption += f"💿 <b>Quality:</b> {meta['quality']}\n"
+    if meta['size']:     caption += f"💾 <b>Size:</b> {meta['size']}\n"
+    if meta['rating']:   caption += f"⭐ <b>IMDb:</b> {meta['rating']}\n"
+    
+    caption += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
+    caption += f"📥 <b>Download / View Post</b>\n"
+    caption += f"👇 <i>Click the button below</i>"
+    # ==========================================================
+
     buttons = [
-        [InlineKeyboardButton("🔗 View / Download", url=final_link)],
-        [InlineKeyboardButton("📺 Tutorial", url=config['tutorial'])]
+        [InlineKeyboardButton("🔗 View / Download Now", url=final_link)],
+        [InlineKeyboardButton("📺 How to Download?", url=config['tutorial'])]
     ]
     
     try:
@@ -198,31 +229,21 @@ async def checker_loop():
                         feed = feedparser.parse(config['feed'])
                         if not feed.entries: continue
                         
-                        # আমরা ফিডের পোস্ট চেক করব
-                        # কিন্তু লজিক হলো: যতক্ষণ না পুরনো 'last_id' পাচ্ছি, ততক্ষণ পর্যন্ত নতুন পোস্ট
-                        
-                        new_posts = []
+                        new_posts =[]
                         last_id = config.get('last_id')
                         
-                        # প্রথম ৫টি পোস্ট চেক করি (যাতে একসাথে একাধিক পোস্ট দিলেও মিস না হয়)
                         for entry in feed.entries[:5]:
                             uid = entry.id if 'id' in entry else clean_url(entry.link)
-                            
-                            if uid == last_id:
-                                break # পুরনো পোস্ট পেয়ে গেছি, আর খোঁজার দরকার নেই
-                            
+                            if uid == last_id: break
                             new_posts.append((entry, uid))
                         
-                        # new_posts লিস্টে এখন সব নতুন পোস্ট আছে
-                        # কিন্তু এগুলো রিভার্স করতে হবে যাতে আগেরটা আগে পোস্ট হয়
                         if new_posts:
                             for entry, uid in reversed(new_posts):
                                 success = await send_post(config, entry)
                                 if success:
-                                    # সাকসেস হলে last_id আপডেট করে দাও
                                     config['last_id'] = uid
                                     changes = True
-                                    await asyncio.sleep(2) # এক সাথে অনেক পোস্ট হলে একটু গ্যাপ দেবে
+                                    await asyncio.sleep(2)
                                     
                     except Exception as e:
                         logger.error(f"Feed Error: {e}")
